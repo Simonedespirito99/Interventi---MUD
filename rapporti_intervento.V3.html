@@ -693,6 +693,32 @@
             }
 
             // === FUNZIONI INVIO DATI ===
+            async function checkInternetConnection() {
+                try {
+                    const response = await fetch('https://www.google.com/favicon.ico', { 
+                        mode: 'no-cors',
+                        cache: 'no-store',
+                        signal: AbortSignal.timeout(5000)
+                    });
+                    return true;
+                } catch {
+                    return false;
+                }
+            }
+            
+            async function retryOperation(operation, maxRetries = 2) {
+                for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                    try {
+                        return await operation();
+                    } catch (error) {
+                        if (attempt === maxRetries) throw error;
+                        
+                        showLoading(`Tentativo ${attempt + 2}/${maxRetries + 1}...`);
+                        await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
+                    }
+                }
+            }
+            
             async function submitFormData() {
                 // Validazione campi obbligatori
                 if (!mudInput.value.trim()) {
@@ -731,6 +757,13 @@
                 }
 
                 try {
+                    // Verifica connessione internet prima di procedere
+                    showLoading('Verifica connessione internet...');
+                    const isConnected = await checkInternetConnection();
+                    if (!isConnected) {
+                        throw new Error('🌐 Nessuna connessione internet:\\n\\n• Verifica di essere connesso a internet\\n• Riprova quando la connessione sarà stabile');
+                    }
+                    
                     showLoading('Invio rapporto in corso...');
 
                     // Prepara i dati (senza firma per ora)
@@ -746,17 +779,21 @@
                         // buonoLavoro: Verrà generato automaticamente dal server
                     };
 
-                    // FASE 1: Invio dati principali
-                    const response1 = await submitDataToServer(formData);
+                    // FASE 1: Invio dati principali con retry automatico
+                    const response1 = await retryOperation(async () => {
+                        showLoading('Invio dati principali...');
+                        return await submitDataToServer(formData);
+                    });
                     if (response1.status !== 'success') {
                         throw new Error(response1.message || 'Errore invio dati principali');
                     }
 
-                    // FASE 2: Upload firma committente
-                    showLoading('Caricamento firma committente...');
+                    // FASE 2: Upload firma committente con retry automatico
                     const firmaCommittenteData = canvasToDataURL(canvasCommittente);
-                    
-                    const response2 = await uploadSignatureToServer(formData.mud, 'committente', firmaCommittenteData);
+                    const response2 = await retryOperation(async () => {
+                        showLoading('Caricamento firma committente...');
+                        return await uploadSignatureToServer(formData.mud, 'committente', firmaCommittenteData);
+                    });
                     if (response2.status !== 'success') {
                         throw new Error(response2.message || 'Errore caricamento firma committente');
                     }
@@ -817,8 +854,8 @@
                     script.src = `${SCRIPT_URL}?${params.toString()}`;
                     script.onerror = () => {
                         delete window[callbackName];
-                        document.head.removeChild(script);
-                        reject(new Error('Errore di rete durante l\'invio dati'));
+                        if (script.parentNode) document.head.removeChild(script);
+                        reject(new Error('🌐 Errore di connessione:\n\n• Verifica la connessione internet\n• Il Google Apps Script potrebbe essere temporaneamente non disponibile\n• Riprova tra qualche minuto'));
                     };
                     
                     document.head.appendChild(script);
@@ -826,10 +863,10 @@
                     setTimeout(() => {
                         if (window[callbackName]) {
                             delete window[callbackName];
-                            document.head.removeChild(script);
-                            reject(new Error('Timeout durante l\'invio dati'));
+                            if (script.parentNode) document.head.removeChild(script);
+                            reject(new Error('⏰ Timeout durante l\'invio dati:\n\n• La connessione è troppo lenta\n• Il server ha impiegato troppo tempo a rispondere\n• Riprova con una connessione migliore'));
                         }
-                    }, 30000);
+                    }, 45000);
                 });
             }
 
@@ -857,8 +894,8 @@
                     script.src = `${SCRIPT_URL}?${params.toString()}`;
                     script.onerror = () => {
                         delete window[callbackName];
-                        document.head.removeChild(script);
-                        reject(new Error('Errore di rete durante upload firma'));
+                        if (script.parentNode) document.head.removeChild(script);
+                        reject(new Error('🖊️ Errore upload firma:\n\n• Problema di connessione durante l\'invio\n• La firma potrebbe essere troppo grande\n• Riprova o disegna una firma più semplice'));
                     };
                     
                     document.head.appendChild(script);
@@ -866,10 +903,10 @@
                     setTimeout(() => {
                         if (window[callbackName]) {
                             delete window[callbackName];
-                            document.head.removeChild(script);
-                            reject(new Error('Timeout durante upload firma'));
+                            if (script.parentNode) document.head.removeChild(script);
+                            reject(new Error('⏰ Timeout upload firma:\n\n• Il caricamento sta richiedendo troppo tempo\n• Prova con una firma più semplice\n• Verifica la connessione internet'));
                         }
-                    }, 30000);
+                    }, 60000);
                 });
             }
 
