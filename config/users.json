@@ -1,0 +1,33 @@
+{
+  "users": {
+    "Admin": {
+      "password": "2977",
+      "role": "admin",
+      "displayName": "Amministratore",
+      "permissions": ["view", "edit", "delete", "admin"]
+    },
+    "Valentino": {
+      "password": "val123",
+      "role": "tecnico",
+      "displayName": "Valentino Rossi",
+      "permissions": ["view", "edit"]
+    },
+    "Marco": {
+      "password": "mar456",
+      "role": "tecnico", 
+      "displayName": "Marco Bianchi",
+      "permissions": ["view", "edit"]
+    },
+    "Giuseppe": {
+      "password": "giu789",
+      "role": "tecnico",
+      "displayName": "Giuseppe Verdi",
+      "permissions": ["view", "edit"]
+    }
+  },
+  "settings": {
+    "sessionTimeout": 3600000,
+    "maxLoginAttempts": 3,
+    "requirePasswordChange": false
+  }
+}
