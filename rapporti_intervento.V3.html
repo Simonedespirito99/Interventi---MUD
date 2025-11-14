@@ -699,10 +699,17 @@
                     const callbackName = 'jsonpCallback' + Date.now();
                     let timeoutId;
                     
-                    console.log('🔄 Invio dati al server...', { url: SCRIPT_URL, data: data });
+                    console.log('🔄 === submitDataToServer INIZIO ===');
+                    console.log('🔄 URL:', SCRIPT_URL);
+                    console.log('🔄 Callback name:', callbackName);
+                    console.log('🔄 Dati da inviare:', JSON.stringify(data, null, 2));
                     
                     window[callbackName] = function(response) {
-                        console.log('✅ Risposta ricevuta:', response);
+                        console.log('✅ === CALLBACK RICEVUTO ===');
+                        console.log('✅ Risposta raw:', response);
+                        console.log('✅ Risposta type:', typeof response);
+                        console.log('✅ Risposta JSON:', JSON.stringify(response, null, 2));
+                        
                         clearTimeout(timeoutId);
                         delete window[callbackName];
                         if (script && script.parentNode) document.head.removeChild(script);
@@ -717,11 +724,16 @@
                     });
                     
                     const fullUrl = `${SCRIPT_URL}?${params.toString()}`;
-                    console.log('📡 URL chiamata:', fullUrl.substring(0, 150) + '...');
+                    console.log('📡 === URL COSTRUZIONE ===');
+                    console.log('📡 URL completo lunghezza:', fullUrl.length);
+                    console.log('📡 URL primi 200 caratteri:', fullUrl.substring(0, 200));
+                    console.log('📡 Parametri:', Object.fromEntries(params));
                     
                     script.src = fullUrl;
                     script.onerror = (error) => {
-                        console.error('❌ Errore connessione Google Apps Script:', error);
+                        console.error('❌ === ERRORE SCRIPT LOADING ===');
+                        console.error('❌ Errore dettagli:', error);
+                        console.error('❌ Script src:', script.src.substring(0, 100));
                         clearTimeout(timeoutId);
                         delete window[callbackName];
                         if (script && script.parentNode) document.head.removeChild(script);
@@ -729,13 +741,21 @@
                     };
                     
                     script.onload = () => {
-                        console.log('📜 Script caricato, attendo risposta...');
+                        console.log('📜 === SCRIPT ONLOAD ===');
+                        console.log('📜 Script caricato, attendo callback...');
+                        console.log('📜 Timestamp onload:', new Date().toISOString());
                     };
                     
+                    console.log('🔄 Aggiungendo script al DOM...');
                     document.head.appendChild(script);
+                    console.log('🔄 Script aggiunto, timer di 30s attivato');
                     
                     timeoutId = setTimeout(() => {
-                        console.error('⏰ Timeout invio dati');
+                        console.error('⏰ === TIMEOUT RAGGIUNTO ===');
+                        console.error('⏰ Timeout dopo 30 secondi');
+                        console.error('⏰ Callback esistente:', !!window[callbackName]);
+                        console.error('⏰ Script nel DOM:', !!script.parentNode);
+                        
                         if (window[callbackName]) {
                             delete window[callbackName];
                             if (script && script.parentNode) document.head.removeChild(script);
@@ -804,8 +824,19 @@
 
             // === FUNZIONE PRINCIPALE SUBMIT ===
             async function submitFormData() {
+                console.log('🚀 === INIZIO SUBMIT FORM DATA ===');
+                console.log('📊 Stato form:', {
+                    mud: mudInput.value,
+                    luogo: luogoInput.value,
+                    dataInizio: dataInizioInput.value,
+                    dataFine: dataFineInput.value,
+                    descrizione: descrizioneInput.value,
+                    user: currentUsername
+                });
+                
                 // Validazione campi obbligatori
                 if (!mudInput.value.trim()) {
+                    console.log('❌ Validazione fallita: MUD mancante');
                     showAlert('Errore', 'Il campo MUD è obbligatorio', '⚠️');
                     return false;
                 }
@@ -835,12 +866,16 @@
                 }
 
                 // Validazione firma committente
+                console.log('🖊️ Controllo firma committente...');
                 if (isCanvasEmpty(canvasCommittente)) {
+                    console.log('❌ Validazione fallita: Firma committente mancante');
                     showAlert('Errore', 'La firma del committente è obbligatoria', '⚠️');
                     return false;
                 }
+                console.log('✅ Tutte le validazioni passate!');
 
                 try {
+                    console.log('🔄 === INIZIO PROCESSO DI INVIO ===');
                     showLoading('Invio rapporto in corso...');
 
                     // Prepara i dati SENZA firma (FASE 1)
@@ -864,18 +899,32 @@
 
                     // FASE 1: Invio dati principali
                     showLoading('Invio dati principali...');
-                    console.log('🚀 FASE 1: Invio dati senza firma');
+                    console.log('🚀 === FASE 1: INVIO DATI PRINCIPALI ===');
+                    console.log('📤 Dati da inviare FASE 1:', JSON.stringify(formData, null, 2));
+                    console.log('⏰ Timestamp FASE 1:', new Date().toISOString());
+                    
                     const response1 = await submitDataToServer(formData);
-                    console.log('📋 Risposta FASE 1:', response1);
+                    
+                    console.log('📋 === RISPOSTA FASE 1 ===');
+                    console.log('📋 Risposta completa FASE 1:', JSON.stringify(response1, null, 2));
+                    console.log('⏰ Timestamp fine FASE 1:', new Date().toISOString());
                     if (response1.status !== 'success') {
                         throw new Error(response1.message || 'Errore invio dati principali');
                     }
 
                     // FASE 2: Upload firma committente
                     showLoading('Caricamento firma committente...');
-                    console.log('🚀 FASE 2: Upload firma');
+                    console.log('🚀 === FASE 2: UPLOAD FIRMA ===');
+                    console.log('🖊️ MUD per firma:', formData.mud);
+                    console.log('🖊️ Tipo firma:', 'committente');
+                    console.log('🖊️ Dimensione firma:', firmaCommittenteBase64.length, 'caratteri');
+                    console.log('⏰ Timestamp inizio FASE 2:', new Date().toISOString());
+                    
                     const response2 = await uploadSignatureToServer(formData.mud, 'committente', firmaCommittenteBase64);
-                    console.log('📋 Risposta FASE 2:', response2);
+                    
+                    console.log('📋 === RISPOSTA FASE 2 ===');
+                    console.log('📋 Risposta completa FASE 2:', JSON.stringify(response2, null, 2));
+                    console.log('⏰ Timestamp fine FASE 2:', new Date().toISOString());
                     if (response2.status !== 'success') {
                         throw new Error(response2.message || 'Errore caricamento firma committente');
                     }
@@ -909,9 +958,17 @@
                     return true;
 
                 } catch (error) {
+                    console.log('❌ === ERRORE CATTURATO ===');
+                    console.error('❌ Errore oggetto completo:', error);
+                    console.error('❌ Errore messaggio:', error.message);
+                    console.error('❌ Errore stack:', error.stack);
+                    console.log('⏰ Timestamp errore:', new Date().toISOString());
+                    
                     hideLoading();
-                    console.error('❌ Errore invio completo:', error);
-                    showAlert('Errore', 'Errore durante invio: ' + error.message, '❌');
+                    
+                    const errorMessage = `Errore durante invio: ${error.message}`;
+                    console.log('🚨 Mostro alert errore:', errorMessage);
+                    showAlert('Errore', errorMessage, '❌');
                     return false;
                 }
             }
