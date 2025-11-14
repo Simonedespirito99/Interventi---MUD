@@ -109,9 +109,6 @@
             </button>
             <div class="flex items-center space-x-4">
                 <span id="current-user" class="text-sm text-gray-600 dark:text-gray-300"></span>
-                <span id="offline-indicator" class="text-xs px-2 py-1 bg-orange-100 text-orange-800 rounded-full hidden">
-                    📴 Offline
-                </span>
                 <button id="logout-btn" class="text-sm text-red-600 hover:text-red-800 px-3 py-1 border border-red-300 rounded-md hover:bg-red-50">
                     Logout
                 </button>
@@ -255,19 +252,7 @@
                     </div>
                 </div>
             </div>
-            
-            <!-- Sezione Dati Offline -->
-            <div id="offline-section" class="hidden">
-                <h3 class="text-lg font-semibold mb-2 text-orange-600">📴 Dati Offline</h3>
-                <div id="offline-list" class="space-y-2">
-                    <div class="text-gray-500 text-sm italic">
-                        Nessun dato offline
-                    </div>
-                </div>
-                <button id="view-offline-data" class="w-full px-3 py-2 text-sm bg-orange-600 text-white rounded-lg hover:bg-orange-700 mt-2">
-                    Visualizza Tutti i Dati Offline
-                </button>
-            </div>
+
         </div>
         
         <!-- Footer Menu (Logout) -->
@@ -374,15 +359,11 @@
             const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxwYmbABswvjz6dQX8nlCNAoAI49KDXyHUH6aX0hPXGjhlCJIDApsMjEjxPYlMQ8IpegA/exec'; // ✅ CONFIGURATO
             console.log('🔗 Google Apps Script URL:', SCRIPT_URL);
             
-            // === MODALITÀ OFFLINE DI EMERGENZA ===
-            let isOfflineMode = false;
-            let googleScriptAvailable = false;
-
             // === MAPPATURA UTENTI PER BUONI LAVORO ===
             const USER_CODE_MAPPING = {
                 'admin': 'A',
                 'tecnico1': 'T',
-                'tecnico2': 'U', // Seconda lettera disponibile
+                'tecnico2': 'U',
                 'valentino': 'V'
             };
 
@@ -713,38 +694,85 @@
                 document.body.style.overflow = '';
             }
 
-            // === FUNZIONI INVIO DATI ===
-            async function checkInternetConnection() {
-                try {
-                    const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 5000);
+            async function submitDataToServer(data) {
+                return new Promise((resolve, reject) => {
+                    const callbackName = 'jsonpCallback' + Date.now();
                     
-                    await fetch('https://www.google.com/favicon.ico', { 
-                        mode: 'no-cors',
-                        cache: 'no-store',
-                        signal: controller.signal
+                    window[callbackName] = function(response) {
+                        delete window[callbackName];
+                        document.head.removeChild(script);
+                        resolve(response);
+                    };
+                    
+                    const script = document.createElement('script');
+                    const params = new URLSearchParams({
+                        callback: callbackName,
+                        action: 'save',
+                        data: encodeURIComponent(JSON.stringify(data))
                     });
                     
-                    clearTimeout(timeoutId);
-                    return true;
-                } catch {
-                    return false;
-                }
+                    script.src = `${SCRIPT_URL}?${params.toString()}`;
+                    script.onerror = (error) => {
+                        console.error('❌ Errore connessione Google Apps Script:', error);
+                        delete window[callbackName];
+                        if (script.parentNode) document.head.removeChild(script);
+                        reject(new Error('Errore di connessione al Google Apps Script. Verifica la configurazione.'));
+                    };
+                    
+                    document.head.appendChild(script);
+                    
+                    setTimeout(() => {
+                        if (window[callbackName]) {
+                            delete window[callbackName];
+                            if (script.parentNode) document.head.removeChild(script);
+                            reject(new Error('Timeout durante l\'invio dati. Riprova.'));
+                        }
+                    }, 30000);
+                });
             }
-            
-            async function retryOperation(operation, maxRetries = 2) {
-                for (let attempt = 0; attempt <= maxRetries; attempt++) {
-                    try {
-                        return await operation();
-                    } catch (error) {
-                        if (attempt === maxRetries) throw error;
-                        
-                        showLoading(`Tentativo ${attempt + 2}/${maxRetries + 1}...`);
-                        await new Promise(resolve => setTimeout(resolve, 2000 * (attempt + 1)));
-                    }
-                }
+
+            async function uploadSignatureToServer(mud, signatureType, signatureBase64) {
+                return new Promise((resolve, reject) => {
+                    const callbackName = 'jsonpCallback' + Date.now();
+                    
+                    window[callbackName] = function(response) {
+                        delete window[callbackName];
+                        document.head.removeChild(script);
+                        resolve(response);
+                    };
+                    
+                    const script = document.createElement('script');
+                    const params = new URLSearchParams({
+                        callback: callbackName,
+                        action: 'upload-signature',
+                        data: encodeURIComponent(JSON.stringify({
+                            mud: mud,
+                            signatureType: signatureType,
+                            signatureBase64: signatureBase64
+                        }))
+                    });
+                    
+                    script.src = `${SCRIPT_URL}?${params.toString()}`;
+                    script.onerror = (error) => {
+                        console.error('❌ Errore upload firma:', error);
+                        delete window[callbackName];
+                        if (script.parentNode) document.head.removeChild(script);
+                        reject(new Error('Errore upload firma. Verifica configurazione Google Apps Script.'));
+                    };
+                    
+                    document.head.appendChild(script);
+                    
+                    setTimeout(() => {
+                        if (window[callbackName]) {
+                            delete window[callbackName];
+                            if (script.parentNode) document.head.removeChild(script);
+                            reject(new Error('Timeout upload firma. Riprova con una firma più semplice.'));
+                        }
+                    }, 30000);
+                });
             }
-            
+
+            // === FUNZIONE PRINCIPALE SUBMIT ===
             async function submitFormData() {
                 // Validazione campi obbligatori
                 if (!mudInput.value.trim()) {
@@ -755,11 +783,11 @@
                     showAlert('Errore', 'Il campo Luogo è obbligatorio', '⚠️');
                     return false;
                 }
-                if (!dataInizioInput.value) {  // MODIFICATO
+                if (!dataInizioInput.value) {
                     showAlert('Errore', 'Il campo Data Inizio è obbligatorio', '⚠️');
                     return false;
                 }
-                if (!dataFineInput.value) {    // MODIFICATO
+                if (!dataFineInput.value) {
                     showAlert('Errore', 'Il campo Data Fine è obbligatorio', '⚠️');
                     return false;
                 }
@@ -798,49 +826,27 @@
                         firmaCommittente: canvasToDataURL(canvasCommittente)
                     };
 
-                    let result;
-                    
-                    if (isOfflineMode || !googleScriptAvailable) {
-                        // MODALITÀ OFFLINE
-                        console.log('📴 Invio in modalità offline');
-                        showLoading('Salvataggio offline...');
-                        result = await saveOfflineData(formData);
-                    } else {
-                        // MODALITÀ ONLINE
-                        console.log('🌐 Invio in modalità online');
-                        
-                        // Verifica connessione internet prima di procedere
-                        showLoading('Verifica connessione...');
-                        const isConnected = await checkInternetConnection();
-                        if (!isConnected) {
-                            throw new Error('🌐 Nessuna connessione internet');
-                        }
+                    console.log('📤 Invio dati:', formData);
 
-                        // FASE 1: Invio dati principali con retry automatico
-                        const response1 = await retryOperation(async () => {
-                            showLoading('Invio dati principali...');
-                            return await submitDataToServer(formData);
-                        });
-                        if (response1.status !== 'success') {
-                            throw new Error(response1.message || 'Errore invio dati principali');
-                        }
-
-                        // FASE 2: Upload firma committente con retry automatico
-                        const response2 = await retryOperation(async () => {
-                            showLoading('Caricamento firma committente...');
-                            return await uploadSignatureToServer(formData.mud, 'committente', formData.firmaCommittente);
-                        });
-                        if (response2.status !== 'success') {
-                            throw new Error(response2.message || 'Errore caricamento firma committente');
-                        }
-                        
-                        result = response1.buonoLavoro ? response1 : response2;
+                    // FASE 1: Invio dati principali
+                    showLoading('Invio dati principali...');
+                    const response1 = await submitDataToServer(formData);
+                    if (response1.status !== 'success') {
+                        throw new Error(response1.message || 'Errore invio dati principali');
                     }
 
+                    // FASE 2: Upload firma committente
+                    showLoading('Caricamento firma committente...');
+                    const response2 = await uploadSignatureToServer(formData.mud, 'committente', formData.firmaCommittente);
+                    if (response2.status !== 'success') {
+                        throw new Error(response2.message || 'Errore caricamento firma committente');
+                    }
+                    
+                    const result = response1.buonoLavoro ? response1 : response2;
                     hideLoading();
 
                     // Mostra il buono di lavoro generato
-                    let successMessage = isOfflineMode ? 'Rapporto salvato offline!' : 'Rapporto inviato con successo!';
+                    let successMessage = 'Rapporto inviato con successo!';
                     if (result.buonoLavoro) {
                         successMessage += `\n\nBuono di Lavoro: ${result.buonoLavoro}`;
                     }
@@ -866,156 +872,10 @@
 
                 } catch (error) {
                     hideLoading();
-                    console.error('Errore invio:', error);
-                    
-                    // Se non è già in modalità offline, prova fallback automatico
-                    if (!isOfflineMode && (error.message.includes('CORS') || error.message.includes('connessione'))) {
-                        console.warn('🔄 Tentativo fallback automatico modalità offline...');
-                        try {
-                            isOfflineMode = true;
-                            googleScriptAvailable = false;
-                            
-                            // Prepara i dati per il salvataggio offline
-                            const formData = {
-                                user: currentUsername,
-                                mud: mudInput.value.trim(),
-                                riferimento: riferimentoInput.value.trim(),
-                                luogo: luogoInput.value.trim(),
-                                dataInizio: dataInizioInput.value,
-                                dataFine: dataFineInput.value,
-                                descrizione: descrizioneInput.value.trim(),
-                                materiali: materialiInput.value.trim(),
-                                firmaCommittente: canvasToDataURL(canvasCommittente)
-                            };
-                            
-                            showLoading('Fallback modalità offline...');
-                            const result = await saveOfflineData(formData);
-                            hideLoading();
-                            
-                            showAlert('Salvato Offline', `Errore connessione risolto con modalità offline.\n\nBuono di Lavoro: ${result.buonoLavoro}\n\nI dati sono salvati localmente.`, '📴');
-                            
-                            // Reset form
-                            interventoForm.reset();
-                            clearSignature(ctxCommittente, statusCommittente);
-                            const today = getCurrentDate();
-                            dataInizioInput.value = today;
-                            dataFineInput.value = today;
-                            
-                            // Mostra indicatori offline
-                            const offlineIndicator = document.getElementById('offline-indicator');
-                            const offlineSection = document.getElementById('offline-section');
-                            if (offlineIndicator) offlineIndicator.classList.remove('hidden');
-                            if (offlineSection) offlineSection.classList.remove('hidden');
-                            loadOfflineData();
-                            
-                            return true;
-                            
-                        } catch (offlineError) {
-                            console.error('Errore anche nel fallback offline:', offlineError);
-                            showAlert('Errore', 'Errore durante invio e fallback offline: ' + error.message, '❌');
-                            return false;
-                        }
-                    } else {
-                        showAlert('Errore', 'Errore durante invio: ' + error.message, '❌');
-                        return false;
-                    }
+                    console.error('❌ Errore invio completo:', error);
+                    showAlert('Errore', 'Errore durante invio: ' + error.message, '❌');
+                    return false;
                 }
-            }
-
-            async function submitDataToServer(data) {
-                return new Promise((resolve, reject) => {
-                    const callbackName = 'jsonpCallback' + Date.now();
-                    
-                    window[callbackName] = function(response) {
-                        delete window[callbackName];
-                        document.head.removeChild(script);
-                        resolve(response);
-                    };
-                    
-                    const script = document.createElement('script');
-                    const params = new URLSearchParams({
-                        callback: callbackName,
-                        action: 'save',
-                        data: encodeURIComponent(JSON.stringify(data))
-                    });
-                    
-                    script.src = `${SCRIPT_URL}?${params.toString()}`;
-                    script.onerror = (error) => {
-                        console.error('❌ Script Error Details:', {
-                            url: script.src,
-                            error: error,
-                            timestamp: new Date().toISOString(),
-                            possibleCauses: ['CORS policy', 'Network error', 'Script not published', 'Invalid URL']
-                        });
-                        delete window[callbackName];
-                        if (script.parentNode) document.head.removeChild(script);
-                        
-                        // Attiva automaticamente modalità offline se non già attiva
-                        if (!isOfflineMode) {
-                            console.warn('🔄 Fallback automatico a modalità offline per errore invio');
-                            isOfflineMode = true;
-                            googleScriptAvailable = false;
-                        }
-                        
-                        reject(new Error('🌐 Errore di connessione al Google Apps Script:\n\n• Possibile errore CORS\n• Script Google non raggiungibile\n• Verifica configurazione script\n• Fallback automatico modalità offline'));
-                    };
-                    
-                    document.head.appendChild(script);
-                    
-                    setTimeout(() => {
-                        if (window[callbackName]) {
-                            delete window[callbackName];
-                            if (script.parentNode) document.head.removeChild(script);
-                            reject(new Error('⏰ Timeout durante l\'invio dati:\n\n• La connessione è troppo lenta\n• Il server ha impiegato troppo tempo a rispondere\n• Riprova con una connessione migliore'));
-                        }
-                    }, 45000);
-                });
-            }
-
-            async function uploadSignatureToServer(mud, signatureType, signatureBase64) {
-                return new Promise((resolve, reject) => {
-                    const callbackName = 'jsonpCallback' + Date.now();
-                    
-                    window[callbackName] = function(response) {
-                        delete window[callbackName];
-                        document.head.removeChild(script);
-                        resolve(response);
-                    };
-                    
-                    const script = document.createElement('script');
-                    const params = new URLSearchParams({
-                        callback: callbackName,
-                        action: 'upload-signature',
-                        data: encodeURIComponent(JSON.stringify({
-                            mud: mud,
-                            signatureType: signatureType,
-                            signatureBase64: signatureBase64
-                        }))
-                    });
-                    
-                    script.src = `${SCRIPT_URL}?${params.toString()}`;
-                    script.onerror = (error) => {
-                        console.error('❌ Upload Signature Error:', {
-                            url: script.src,
-                            error: error,
-                            signatureType: signatureType,
-                            timestamp: new Date().toISOString()
-                        });
-                        delete window[callbackName];
-                        if (script.parentNode) document.head.removeChild(script);
-                        reject(new Error('🖊️ Errore upload firma al Google Apps Script:\n\n• URL: ' + script.src + '\n• Verifica configurazione script Google\n• La firma potrebbe essere troppo grande\n• Riprova o disegna una firma più semplice'));
-                    };
-                    
-                    document.head.appendChild(script);
-                    
-                    setTimeout(() => {
-                        if (window[callbackName]) {
-                            delete window[callbackName];
-                            if (script.parentNode) document.head.removeChild(script);
-                            reject(new Error('⏰ Timeout upload firma:\n\n• Il caricamento sta richiedendo troppo tempo\n• Prova con una firma più semplice\n• Verifica la connessione internet'));
-                        }
-                    }, 60000);
-                });
             }
 
             // === GESTIONE NUOVO INTERVENTO ===
@@ -1067,174 +927,7 @@
                 }
             });
 
-            // === TEST CONNETTIVITÀ GOOGLE APPS SCRIPT ===
-            async function testGoogleAppsScript() {
-                try {
-                    console.log('🔍 Test connettività Google Apps Script...');
-                    
-                    // Prima prova un test semplice senza JSONP
-                    try {
-                        const simpleTest = await fetch(SCRIPT_URL, { 
-                            method: 'GET',
-                            mode: 'no-cors',
-                            cache: 'no-cache'
-                        });
-                        console.log('📡 Test base connessione:', simpleTest.type);
-                    } catch (e) {
-                        console.log('📡 Test base non riuscito (normale):', e.message);
-                    }
-                    
-                    // Test JSONP principale
-                    const testUrl = `${SCRIPT_URL}?callback=testCallback&action=ping&data=${encodeURIComponent(JSON.stringify({test: true}))}`;
-                    console.log('📡 Test JSONP URL:', testUrl);
-                    
-                    return new Promise((resolve, reject) => {
-                        const callbackName = 'testCallback' + Date.now();
-                        
-                        window[callbackName] = function(response) {
-                            delete window[callbackName];
-                            document.head.removeChild(script);
-                            console.log('✅ Google Apps Script: CONNESSO', response);
-                            googleScriptAvailable = true;
-                            isOfflineMode = false;
-                            resolve(response);
-                        };
-                        
-                        const script = document.createElement('script');
-                        script.src = testUrl.replace('testCallback', callbackName);
-                        
-                        script.onerror = (error) => {
-                            console.error('❌ JSONP Error Details:', {
-                                error: error,
-                                url: script.src,
-                                message: 'Possibile problema CORS o script non raggiungibile'
-                            });
-                            delete window[callbackName];
-                            if (script.parentNode) document.head.removeChild(script);
-                            console.warn('⚠️ Google Apps Script: NON RAGGIUNGIBILE - Attivazione modalità offline');
-                            googleScriptAvailable = false;
-                            isOfflineMode = true;
-                            showOfflineWarning();
-                            resolve({ status: 'offline', message: 'Modalità offline attivata per errore CORS/connessione' });
-                        };
-                        
-                        document.head.appendChild(script);
-                        
-                        // Timeout test ridotto per feedback più veloce
-                        setTimeout(() => {
-                            if (window[callbackName]) {
-                                delete window[callbackName];
-                                if (script.parentNode) document.head.removeChild(script);
-                                console.warn('⏰ Google Apps Script: TIMEOUT - Attivazione modalità offline');
-                                googleScriptAvailable = false;
-                                isOfflineMode = true;
-                                showOfflineWarning();
-                                resolve({ status: 'timeout', message: 'Modalità offline attivata per timeout' });
-                            }
-                        }, 5000); // Timeout ridotto a 5 secondi per feedback più rapido
-                    });
-                } catch (error) {
-                    console.error('❌ Errore test Google Apps Script:', error);
-                    isOfflineMode = true;
-                    showOfflineWarning();
-                    return { status: 'error', message: 'Modalità offline attivata per errore' };
-                }
-            }
-            
-            // === MODALITÀ OFFLINE ===
-            function showOfflineWarning() {
-                // Mostra indicatore offline
-                const offlineIndicator = document.getElementById('offline-indicator');
-                const offlineSection = document.getElementById('offline-section');
-                if (offlineIndicator) offlineIndicator.classList.remove('hidden');
-                if (offlineSection) offlineSection.classList.remove('hidden');
-                
-                setTimeout(() => {
-                    showAlert('Modalità Offline', 'Google Apps Script non raggiungibile.\n\nPossibili cause:\n• Errore CORS (configurazione script)\n• Script non pubblicato correttamente\n• Connessione internet\n\nModalità offline attivata:\n• Puoi compilare il form\n• Salvare bozze\n• Testare le firme\n\nI dati verranno salvati localmente.', '📴');
-                }, 2000);
-                
-                loadOfflineData();
-            }
-            
-            function generateOfflineWorkOrder(user) {
-                const userCode = USER_CODE_MAPPING[user] || 'X';
-                const timestamp = Date.now().toString().slice(-4);
-                return `${userCode}${timestamp}-OFFLINE`;
-            }
-            
-            async function saveOfflineData(data) {
-                const offlineData = {
-                    ...data,
-                    buonoLavoro: generateOfflineWorkOrder(data.user),
-                    timestamp: new Date().toISOString(),
-                    status: 'offline'
-                };
-                
-                // Salva in localStorage
-                const offlineReports = JSON.parse(localStorage.getItem('smirt_offline_reports') || '[]');
-                offlineReports.push(offlineData);
-                localStorage.setItem('smirt_offline_reports', JSON.stringify(offlineReports));
-                
-                console.log('📴 Dati salvati offline:', offlineData);
-                return {
-                    status: 'success',
-                    message: 'Dati salvati in modalità offline',
-                    buonoLavoro: offlineData.buonoLavoro
-                };
-            }
-            
-            function loadOfflineData() {
-                const offlineReports = JSON.parse(localStorage.getItem('smirt_offline_reports') || '[]');
-                const offlineList = document.getElementById('offline-list');
-                
-                if (!offlineList) return;
-                
-                offlineList.innerHTML = '';
-                
-                if (offlineReports.length === 0) {
-                    offlineList.innerHTML = '<div class="text-gray-500 text-sm italic">Nessun dato offline</div>';
-                    return;
-                }
-                
-                // Mostra ultimi 3 rapporti offline
-                const recentReports = offlineReports.slice(-3).reverse();
-                recentReports.forEach(report => {
-                    const reportElement = document.createElement('div');
-                    reportElement.className = 'p-2 bg-orange-50 dark:bg-orange-900 rounded border';
-                    reportElement.innerHTML = `
-                        <div class="text-sm font-medium">${report.mud || 'N/A'}</div>
-                        <div class="text-xs text-gray-600">${report.buonoLavoro}</div>
-                        <div class="text-xs text-gray-500">${new Date(report.timestamp).toLocaleString()}</div>
-                    `;
-                    offlineList.appendChild(reportElement);
-                });
-            }
-            
-            function showAllOfflineData() {
-                const offlineReports = JSON.parse(localStorage.getItem('smirt_offline_reports') || '[]');
-                
-                if (offlineReports.length === 0) {
-                    showAlert('Dati Offline', 'Nessun rapporto salvato offline.', '📴');
-                    return;
-                }
-                
-                let message = `Rapporti offline salvati (${offlineReports.length}):\n\n`;
-                offlineReports.slice(-10).forEach((report, index) => {
-                    message += `${index + 1}. ${report.mud} - ${report.buonoLavoro}\n`;
-                    message += `   ${new Date(report.timestamp).toLocaleDateString()}\n\n`;
-                });
-                
-                if (offlineReports.length > 10) {
-                    message += `... e altri ${offlineReports.length - 10} rapporti`;
-                }
-                
-                showAlert('Dati Offline', message, '📴');
-            }
-
             // === INIZIALIZZAZIONE DIRETTA APP ===
-            // Test iniziale connettività
-            testGoogleAppsScript();
-            
             // Inizializza data corrente
             const today = getCurrentDate();
             dataInizioInput.value = today;
@@ -1264,12 +957,6 @@
             newInterventoButton.addEventListener('click', showNewInterventoModal);
             newInterventoCancel.addEventListener('click', hideNewInterventoModal);
             newInterventoConfirm.addEventListener('click', createNewIntervento);
-            
-            // Dati offline
-            const viewOfflineDataButton = document.getElementById('view-offline-data');
-            if (viewOfflineDataButton) {
-                viewOfflineDataButton.addEventListener('click', showAllOfflineData);
-            }
 
             // Modal alerts
             document.getElementById('alert-cancel').addEventListener('click', hideAlert);
